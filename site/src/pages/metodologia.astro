@@ -1,0 +1,114 @@
+---
+import Base from '../layouts/Base.astro';
+import Disclaimer from '../components/Disclaimer.astro';
+import { meta, readJson } from '../lib/data';
+import { reais, inteiro, dataHoraBR } from '../lib/format';
+import { href } from '../lib/url';
+
+const m = meta();
+const o = readJson('outliers.json');
+const ufs = Object.entries(m.cota_por_uf).sort((a, b) => a[0].localeCompare(b[0]));
+const ultimoAno = m.anos[m.anos.length - 1];
+---
+<Base title="Metodologia" active="metodologia" description="De onde vêm os dados do Gastômetro, como são limpos e como os pontos fora da curva são calculados.">
+  <section class="wrap page-head">
+    <p class="eyebrow">Metodologia</p>
+    <h1>Como o Gastômetro funciona</h1>
+    <p class="lede">Tudo aqui vem de dados abertos oficiais da Câmara dos Deputados. O código do pipeline e do site é aberto, então qualquer número pode ser reproduzido.</p>
+  </section>
+
+  <section class="wrap prose">
+    <div class="card section">
+      <h2>Fonte dos dados</h2>
+      <p>
+        A <strong>Cota para o Exercício da Atividade Parlamentar (CEAP)</strong> é a verba mensal que cada deputado federal pode usar para despesas do mandato.
+        A Câmara publica todas as despesas reembolsadas em arquivos anuais (<code>{m.fonte.arquivos}</code>) e na
+        <a href={m.fonte.api} rel="noopener">API de Dados Abertos</a>. Página oficial: <a href={m.fonte.url} rel="noopener">Dados abertos da cota parlamentar</a>.
+      </p>
+      <p>Última execução do pipeline: <strong>{dataHoraBR(m.gerado_em)}</strong>. Período coberto: {m.periodo.inicio} a {m.periodo.fim}, apenas a {m.legislatura}ª legislatura (desde fevereiro de 2023). Os dados de {ultimoAno} são parciais e a Câmara pode lançar ou corrigir despesas de meses anteriores.</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Arquivo</th><th>Atualizado na fonte</th><th class="num">Linhas lidas</th><th class="num">Carregadas</th><th class="num">Outra legislatura</th><th class="num">Rejeitadas</th></tr></thead>
+          <tbody>
+            {m.arquivos.map((a) => (
+              <tr>
+                <td>{a.url ? <a href={a.url}>{a.arquivo}</a> : a.arquivo}</td>
+                <td>{a.atualizado_na_fonte ?? '—'}</td>
+                <td class="num">{inteiro(a.linhas_lidas)}</td>
+                <td class="num">{inteiro(a.linhas_carregadas)}</td>
+                <td class="num">{inteiro(a.linhas_outra_legislatura)}</td>
+                <td class="num">{inteiro(a.linhas_rejeitadas)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card section">
+      <h2>Etapas do pipeline</h2>
+      <ol>
+        <li><strong>Download</strong> dos arquivos anuais (com cache por data de modificação) e da lista de deputados da API, usada só para foto e situação atual.</li>
+        <li><strong>Validação do esquema</strong>: o pipeline para se faltar alguma coluna obrigatória; colunas novas geram aviso; linhas sem valor ou mês válidos são rejeitadas e contadas.</li>
+        <li><strong>Limpeza</strong>: CNPJ/CPF reduzidos a dígitos (com verificação de dígitos e zeros à esquerda recuperados), datas e valores convertidos, nomes de categorias padronizados, siglas de partido e UF normalizadas.</li>
+        <li><strong>Carga</strong> em um banco DuckDB local.</li>
+        <li><strong>Agregação</strong> em arquivos JSON compactos (e um Parquet mensal para análise) que este site lê.</li>
+      </ol>
+    </div>
+
+    <div class="card section">
+      <h2>Decisões e limitações</h2>
+      <ul>
+        <li><strong>Valor usado</strong>: o valor líquido (<code>vlrLiquido</code>), que é o efetivamente reembolsado depois de glosas. Estornos de passagens aparecem como valores negativos e entram nas somas, como na fonte.</li>
+        <li><strong>Mês</strong>: o mês de competência informado pela Câmara (<code>numMes</code>/<code>numAno</code>), que pode diferir da data de emissão da nota.</li>
+        <li><strong>Lideranças partidárias</strong> (por exemplo, “Liderança do PT”, “LID.GOV-CD”) também usam a cota, mas não são deputados: {inteiro(m.liderancas.despesas)} despesas ({reais(m.liderancas.valor)}) ficam fora dos rankings.</li>
+        <li><strong>Partido</strong>: usamos a sigla mais recente de cada deputado nos dados. Quem mudou de partido aparece com a sigla atual em todos os anos; as outras siglas aparecem na página do deputado.</li>
+        <li><strong>Suplentes</strong> ficam menos tempo no cargo e por isso gastam menos no total. Compare com cuidado.</li>
+        <li><strong>Privacidade</strong>: o CPF do deputado não é publicado. Fornecedores pessoa física aparecem com CPF mascarado (***.123.456-**).</li>
+        <li><strong>Fornecedores</strong>: a busca inclui os maiores fornecedores por valor; a lista completa está nos arquivos da Câmara e no banco gerado pelo pipeline.</li>
+      </ul>
+    </div>
+
+    <div class="card section" id="fora-da-curva">
+      <h2>Pontos fora da curva</h2>
+      <Disclaimer />
+      <h3 style="margin-top:16px">Despesas individuais</h3>
+      <p>{o.metodos.despesas}</p>
+      <h3>Meses</h3>
+      <p>{o.metodos.meses}</p>
+      <h3>Fornecedores com muitos gabinetes</h3>
+      <p>{o.metodos.fornecedores}</p>
+      <p class="muted small">Por que estatística robusta? Mediana e MAD praticamente não mudam quando existem alguns valores extremos, ao contrário de média e desvio padrão. O escore z modificado (Iglewicz e Hoaglin, 1993) com corte em {String(o.parametros.z_modificado).replace(".", ",")} é um critério conservador e bastante usado. Trabalhamos com o logaritmo dos valores porque gastos têm distribuição assimétrica.</p>
+    </div>
+
+    <div class="card section">
+      <h2>Valor mensal da cota por estado</h2>
+      <p>A cota varia por UF porque considera o preço das passagens entre Brasília e a capital de cada estado. Valores de referência do Ato da Mesa de janeiro de 2023 (de {reais(36582.46)} no DF a {reais(51406.33)} em RR); para 2026 aplicamos o reajuste de 13,75% anunciado pela Mesa. Os valores de 2023 conferem com a tabela por UF <a href="https://www.itatiaia.com.br/politica/saiba-quanto-cada-deputado-federal-pode-gastar-com-a-cota-parlamentar">publicada pela Itatiaia</a> (out/2025); os de 2026 são estimados. Usamos esses valores só para comparar estados entre si.</p>
+      <div class="table-wrap">
+        <table class="uf-table">
+          <thead><tr><th>UF</th><th class="num">Cota mensal ({ultimoAno})</th><th>UF</th><th class="num">Cota mensal ({ultimoAno})</th></tr></thead>
+          <tbody>
+            {Array.from({ length: Math.ceil(ufs.length / 2) }, (_, i) => (
+              <tr>
+                <td>{ufs[i][0]}</td><td class="num">{reais(ufs[i][1])}</td>
+                {ufs[i + Math.ceil(ufs.length / 2)] ? <><td>{ufs[i + Math.ceil(ufs.length / 2)][0]}</td><td class="num">{reais(ufs[i + Math.ceil(ufs.length / 2)][1])}</td></> : <><td></td><td></td></>}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card section">
+      <h2>Licença e reutilização</h2>
+      <p>Os dados são públicos, publicados pela Câmara dos Deputados como dados abertos. O código do Gastômetro está sob licença MIT. Os agregados em <a href={href('data/meta.json')}>/data</a> podem ser reutilizados citando a fonte original. Arquivo para análise: <a href={href('data/gastos_mensais.parquet')}>gastos_mensais.parquet</a> (deputado × mês × categoria).</p>
+    </div>
+  </section>
+</Base>
+
+<style>
+  .prose p, .prose li { max-width: 80ch; }
+  .prose li { margin-bottom: .5em; }
+  .prose code { font-size: .88em; background: var(--surface-2); padding: 1px 5px; border-radius: 5px; overflow-wrap: anywhere; }
+  .prose .note { margin: 6px 0 0; }
+</style>

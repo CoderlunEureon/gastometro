@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gastometro"
+version = "0.1.0"
+description = "Pipeline de dados da Cota Parlamentar (CEAP) da Câmara dos Deputados"
+readme = "../README.md"
+license = "MIT"
+requires-python = ">=3.12"
+dependencies = [
+  "duckdb>=1.4",
+  "pyarrow>=21",
+  "requests>=2.32",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[project.scripts]
+gastometro = "gastometro.cli:main"
+
+[tool.setuptools]
+packages = ["gastometro"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

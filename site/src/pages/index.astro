@@ -1,0 +1,206 @@
+---
+import Base from '../layouts/Base.astro';
+import Disclaimer from '../components/Disclaimer.astro';
+import { meta, readJson } from '../lib/data';
+import { reaisCurto, inteiro, dataHoraBR } from '../lib/format';
+import { href } from '../lib/url';
+
+const m = meta();
+const overview = readJson('overview.json');
+const ranking = readJson('ranking.json');
+
+// Top deputies per year (and for the whole period), computed at build time.
+const tops: Record<string, Array<[number, string, string, string, number]>> = {};
+for (const key of ['todos', ...m.anos.map(String)]) {
+  const sums = new Map<number, number>();
+  for (const [d, ano, , total] of ranking.linhas) {
+    if (key !== 'todos' && String(ano) !== key) continue;
+    sums.set(d, (sums.get(d) ?? 0) + total);
+  }
+  tops[key] = [...sums.entries()].sort((a, b) => b[1] - a[1]).slice(0, 10).map(([d, total]) => {
+    const [id, nome, partido, uf] = ranking.deputados[d];
+    return [id, nome, partido, uf, Math.round(total * 100) / 100];
+  });
+}
+const payload = { overview, tops, anos: m.anos, base: href('') };
+const ultimoAno = m.anos[m.anos.length - 1];
+---
+<Base title="Gastômetro" active="inicio">
+  <section class="wrap page-head hero">
+    <p class="eyebrow">Cota para o Exercício da Atividade Parlamentar · {m.legislatura}ª legislatura</p>
+    <h1>Quanto os deputados federais gastam da cota parlamentar</h1>
+    <p class="lede">
+      Cada deputado tem uma verba mensal para custear o mandato: passagens, escritório, combustível, divulgação e mais.
+      Aqui estão todas as despesas publicadas pela Câmara desde {m.periodo.inicio.split('-').reverse().join('/')}, organizadas por deputado, partido, estado, categoria e fornecedor.
+    </p>
+    <p class="muted small">Atualizado em {dataHoraBR(m.gerado_em)} · {inteiro(m.totais.despesas)} despesas · dados de {ultimoAno} são parciais</p>
+  </section>
+
+  <section class="wrap">
+    <div class="controls" role="group" aria-label="Escolher período">
+      <div class="seg" id="year-seg">
+        <button type="button" data-year="todos" aria-pressed="true">Todo o período</button>
+        {m.anos.map((a) => <button type="button" data-year={String(a)} aria-pressed="false">{a}</button>)}
+      </div>
+    </div>
+
+    <div class="grid grid-4 section" aria-live="polite">
+      <div class="card stat"><div class="label">Total gasto</div><div class="value" id="s-total">{reaisCurto(m.totais.valor)}</div><div class="hint" id="s-total-hint">valor líquido reembolsado</div></div>
+      <div class="card stat"><div class="label">Despesas</div><div class="value" id="s-docs">{inteiro(m.totais.despesas)}</div><div class="hint">notas, recibos e bilhetes</div></div>
+      <div class="card stat"><div class="label">Deputados com gastos</div><div class="value" id="s-deps">{inteiro(m.totais.deputados)}</div><div class="hint">inclui suplentes que assumiram</div></div>
+      <div class="card stat"><div class="label">Média por deputado</div><div class="value" id="s-avg">—</div><div class="hint">no período selecionado</div></div>
+    </div>
+
+    <div class="card section">
+      <h2>Gasto mensal</h2>
+      <p class="sub">Soma de todas as despesas por mês de competência. Dezembro costuma ser alto porque o saldo não usado da cota se acumula ao longo do ano. Os meses mais recentes ainda estão incompletos: as notas são lançadas com atraso.</p>
+      <div class="chart" id="c-monthly" role="img" aria-label="Gráfico de colunas do gasto mensal"></div>
+    </div>
+
+    <div class="grid grid-2 section">
+      <div class="card">
+        <h2>Por categoria</h2>
+        <p class="sub">Em que tipo de despesa a cota é usada.</p>
+        <div class="chart" id="c-cat" role="img" aria-label="Gráfico de barras do gasto por categoria"></div>
+      </div>
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;align-items:start">
+          <div><h2>Por partido</h2><p class="sub">Partido mais recente de cada deputado nos dados. A média considera partidos com 3 ou mais deputados.</p></div>
+          <div class="seg" id="party-mode" role="group" aria-label="Métrica por partido">
+            <button type="button" data-mode="media" aria-pressed="true">Média por deputado</button>
+            <button type="button" data-mode="total" aria-pressed="false">Total</button>
+          </div>
+        </div>
+        <div class="chart" id="c-party" role="img" aria-label="Gráfico de barras do gasto por partido"></div>
+      </div>
+    </div>
+
+    <div class="grid grid-2 section">
+      <div class="card">
+        <h2>Por estado</h2>
+        <p class="sub">Média por deputado. A cota é maior para estados mais distantes de Brasília.</p>
+        <div class="chart" id="c-uf" role="img" aria-label="Gráfico de barras da média por deputado em cada estado"></div>
+      </div>
+      <div class="card">
+        <h2>Quem mais usou a cota</h2>
+        <p class="sub">Deputados com maior valor somado no período. <a href={href('ranking/')}>Ver ranking completo →</a></p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th class="rank">#</th><th>Deputado</th><th class="num">Total</th></tr></thead>
+            <tbody id="t-top"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <Disclaimer compact />
+  </section>
+
+  <script type="application/json" id="home-data" set:html={JSON.stringify(payload)} />
+</Base>
+
+<script>
+  import { mount, monthlyChart, hbarChart, cssVar } from '../scripts/charts';
+  import { reais, reaisCurto, inteiro, esc } from '../lib/format';
+
+  const data = JSON.parse(document.getElementById('home-data')!.textContent!);
+  const ov = data.overview;
+  let year = 'todos';
+  let partyMode = 'media';
+
+  // Yearly rows; "todos" sums every year (ano = 0 rows are skipped here).
+  const inYear = (r: any) => r.ano !== 0 && (year === 'todos' || String(r.ano) === year);
+  // For distinct-deputy rows the pipeline ships ano = 0 for the whole period.
+  const inYearExact = (r: any) => (year === 'todos' ? r.ano === 0 : String(r.ano) === year);
+
+  function sumBy(rows: any[], key: string, filter = inYear) {
+    const map = new Map<string, { total: number; deputados: number }>();
+    for (const r of rows.filter(filter)) {
+      const k = r[key] ?? 'S/PARTIDO';
+      const cur = map.get(k) ?? { total: 0, deputados: 0 };
+      cur.total += r.total;
+      cur.deputados += r.deputados ?? 0;
+      map.set(k, cur);
+    }
+    return map;
+  }
+
+  function renderStats() {
+    const years = ov.por_ano.filter(inYear);
+    const total = years.reduce((s: number, r: any) => s + r.total, 0);
+    const docs = years.reduce((s: number, r: any) => s + r.despesas, 0);
+    const deps = year === 'todos' ? null : years[0]?.deputados;
+    document.getElementById('s-total')!.textContent = reaisCurto(total);
+    document.getElementById('s-total')!.title = reais(total);
+    document.getElementById('s-docs')!.textContent = inteiro(docs);
+    const depsEl = document.getElementById('s-deps')!;
+    const allDeps = Number(depsEl.dataset.all ?? depsEl.textContent!.replace(/\D/g, ''));
+    depsEl.dataset.all = String(allDeps);
+    const nDeps = deps ?? allDeps;
+    depsEl.textContent = inteiro(nDeps);
+    document.getElementById('s-avg')!.textContent = reaisCurto(total / nDeps);
+  }
+
+  function renderTop() {
+    const rows = data.tops[year];
+    document.getElementById('t-top')!.innerHTML = rows.map((r: any[], i: number) => `
+      <tr><td class="rank num">${i + 1}</td>
+      <td><a href="${data.base}deputado/${r[0]}/">${esc(r[1])}</a> <span class="pill">${r[2] ?? 's/partido'}-${r[3] ?? ''}</span></td>
+      <td class="num">${reais(r[4], false)}</td></tr>`).join('');
+  }
+
+  function registerCharts() {
+    mount(document.getElementById('c-monthly'), (w) => {
+      const rows = ov.mensal.filter(inYear);
+      return monthlyChart(rows, w);
+    });
+    mount(document.getElementById('c-cat'), (w) => {
+      const map = sumBy(ov.por_categoria, 'categoria');
+      const rows = [...map.entries()].map(([label, v]) => ({ label, value: v.total })).sort((a, b) => b.value - a.value);
+      const top = rows.slice(0, 9);
+      const rest = rows.slice(9).reduce((s, r) => s + r.value, 0);
+      if (rest > 0) top.push({ label: 'Outras categorias', value: rest });
+      return hbarChart(top, w);
+    });
+    mount(document.getElementById('c-party'), (w) => {
+      const totals = sumBy(ov.por_partido, 'partido', inYearExact);
+      const rows = [...totals.entries()].map(([label, v]) => {
+        const n = v.deputados || 1;
+        return { label, value: partyMode === 'media' ? v.total / n : v.total, extra: `${n} deputado(s)`, n };
+      }).filter((r) => partyMode === 'total' || r.n >= 3)
+        .sort((a, b) => b.value - a.value);
+      return hbarChart(rows, w, { labelWidth: 120, color: cssVar('--series-1') });
+    });
+    mount(document.getElementById('c-uf'), (w) => {
+      const totals = sumBy(ov.por_uf, 'uf', inYearExact);
+      const rows = [...totals.entries()].map(([label, v]) => ({ label, value: v.total / (v.deputados || 1), extra: `${v.deputados} deputado(s)` }))
+        .sort((a, b) => b.value - a.value);
+      return hbarChart(rows, w, { labelWidth: 44 });
+    });
+  }
+
+  function rerender() {
+    renderStats();
+    renderTop();
+    window.dispatchEvent(new CustomEvent('themechange'));
+  }
+
+  document.getElementById('year-seg')!.addEventListener('click', (e) => {
+    const b = (e.target as HTMLElement).closest('button');
+    if (!b) return;
+    year = b.dataset.year!;
+    for (const x of document.querySelectorAll('#year-seg button')) x.setAttribute('aria-pressed', String(x === b));
+    rerender();
+  });
+  document.getElementById('party-mode')!.addEventListener('click', (e) => {
+    const b = (e.target as HTMLElement).closest('button');
+    if (!b) return;
+    partyMode = b.dataset.mode!;
+    for (const x of document.querySelectorAll('#party-mode button')) x.setAttribute('aria-pressed', String(x === b));
+    window.dispatchEvent(new CustomEvent('themechange'));
+  });
+
+  registerCharts();
+  renderStats();
+  renderTop();
+</script>

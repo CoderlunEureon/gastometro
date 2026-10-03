@@ -1,0 +1,126 @@
+---
+import Base from '../layouts/Base.astro';
+import Disclaimer from '../components/Disclaimer.astro';
+import { readJson } from '../lib/data';
+import { reais, inteiro, percentual, dataBR, MESES } from '../lib/format';
+import { href } from '../lib/url';
+
+const o = readJson('outliers.json');
+const c = o.contagens;
+const ufs = [...new Set(o.despesas.map((e: any) => e.uf))].sort() as string[];
+const cats = [...new Set(o.despesas.map((e: any) => e.categoria))].sort() as string[];
+---
+<Base title="Pontos fora da curva" active="fora-da-curva" description="Gastos estatisticamente atípicos da cota parlamentar, com método explicado e link para o documento original. Atípico não significa irregular.">
+  <section class="wrap page-head">
+    <p class="eyebrow">Gastos atípicos (estatisticamente)</p>
+    <h1>Pontos fora da curva</h1>
+    <p class="lede">Valores que ficam longe do que é típico quando comparados com despesas parecidas. São um ponto de partida para quem quer ler os documentos originais, nunca uma conclusão.</p>
+    <Disclaimer />
+  </section>
+
+  <section class="wrap">
+    <nav class="seg jump" aria-label="Seções">
+      <a href="#despesas">Despesas ({inteiro(c.despesas)})</a>
+      <a href="#meses">Meses ({inteiro(c.meses)})</a>
+      <a href="#fornecedores">Fornecedores ({inteiro(c.fornecedores)})</a>
+    </nav>
+
+    <div class="card section" id="despesas">
+      <h2>Despesas individuais</h2>
+      <p class="method"><strong>Método.</strong> {o.metodos.despesas}</p>
+      <p class="muted small">
+        {inteiro(c.despesas_avaliadas)} despesas puderam ser avaliadas; {inteiro(c.despesas)} ({percentual(c.despesas / c.despesas_avaliadas)}) ficaram fora da faixa típica.
+        Por categoria: {c.despesas_por_categoria.slice(0, 5).map((x: any) => `${x.categoria} (${inteiro(x.n)})`).join(', ')}.
+        Abaixo, as {o.despesas.length} mais distantes da mediana do grupo.
+      </p>
+      <div class="controls">
+        <label class="field">Estado<select id="f-uf"><option value="">Todos</option>{ufs.map((u) => <option>{u}</option>)}</select></label>
+        <label class="field">Categoria<select id="f-cat"><option value="">Todas</option>{cats.map((x) => <option>{x}</option>)}</select></label>
+      </div>
+      <div class="table-wrap">
+        <table id="t-desp">
+          <thead><tr><th>Deputado</th><th>Data</th><th>Categoria</th><th>Fornecedor</th><th class="num">Valor</th><th class="num">Mediana do grupo</th><th class="num">× mediana</th><th>Documento</th></tr></thead>
+          <tbody>
+            {o.despesas.map((e: any) => (
+              <tr data-uf={e.uf} data-cat={e.categoria}>
+                <td><a href={href(`deputado/${e.id}/`)}>{e.nome}</a> <span class="pill">{e.partido ?? 's/partido'}-{e.uf}</span></td>
+                <td class="num">{e.data ? dataBR(e.data) : `${MESES[e.mes - 1]}/${e.ano}`}</td>
+                <td>{e.categoria}</td>
+                <td>{e.fornecedor}</td>
+                <td class="num">{reais(e.valor)}</td>
+                <td class="num">{reais(e.mediana_grupo)}</td>
+                <td class="num">{e.vezes_mediana.toLocaleString('pt-BR')}×</td>
+                <td>{e.url ? <a href={e.url} rel="noopener" target="_blank">Ver nota ↗</a> : <span class="muted small">não publicado</span>}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card section" id="meses">
+      <h2>Meses com gasto muito acima do típico</h2>
+      <p class="method"><strong>Método.</strong> {o.metodos.meses}</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Deputado</th><th>Mês</th><th class="num">Total no mês</th><th class="num">Cota mensal da UF</th><th class="num">Proporção</th><th class="num">Mediana (ano)</th></tr></thead>
+          <tbody>
+            {o.meses.map((m: any) => (
+              <tr>
+                <td><a href={href(`deputado/${m.id}/`)}>{m.nome}</a> <span class="pill">{m.partido ?? 's/partido'}-{m.uf}</span></td>
+                <td class="num">{MESES[m.mes - 1]}/{m.ano}</td>
+                <td class="num">{reais(m.total)}</td>
+                <td class="num">{reais(m.cota_mensal)}</td>
+                <td class="num">{percentual(m.proporcao)}</td>
+                <td class="num">{percentual(m.mediana_proporcao)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card section" id="fornecedores">
+      <h2>Fornecedores que atendem muitos gabinetes</h2>
+      <p class="method"><strong>Método.</strong> {o.metodos.fornecedores}</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Fornecedor</th><th>Categoria principal</th><th class="num">Gabinetes</th><th class="num">Corte (p99)</th><th class="num">Partidos</th><th class="num">UFs</th><th class="num">Total</th></tr></thead>
+          <tbody>
+            {o.fornecedores.map((f: any) => (
+              <tr>
+                <td><a href={href(`fornecedores/?q=${encodeURIComponent(f.documento ?? f.nome)}`)}>{f.nome}</a><div class="muted small">{f.documento}</div></td>
+                <td>{f.categoria}</td>
+                <td class="num">{inteiro(f.gabinetes)}</td>
+                <td class="num">{f.corte_p99.toLocaleString('pt-BR')}</td>
+                <td class="num">{f.partidos}</td>
+                <td class="num">{f.ufs}</td>
+                <td class="num">{reais(f.total, false)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+</Base>
+
+<script>
+  const uf = document.getElementById('f-uf') as HTMLSelectElement;
+  const cat = document.getElementById('f-cat') as HTMLSelectElement;
+  function filter() {
+    for (const tr of document.querySelectorAll<HTMLTableRowElement>('#t-desp tbody tr')) {
+      tr.hidden = (!!uf.value && tr.dataset.uf !== uf.value) || (!!cat.value && tr.dataset.cat !== cat.value);
+    }
+  }
+  uf.addEventListener('change', filter);
+  cat.addEventListener('change', filter);
+</script>
+
+<style>
+  .jump { margin: 4px 0 8px; }
+  .jump a { padding: 6px 12px; border-radius: 999px; color: var(--text-2); text-decoration: none; font-size: .875rem; }
+  .jump a:hover { background: var(--surface); color: var(--text); }
+  .method { color: var(--text-2); font-size: .93rem; max-width: 80ch; }
+  .page-head :global(.note) { margin-top: 8px; max-width: 80ch; }
+</style>

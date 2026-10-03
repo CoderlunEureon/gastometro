@@ -1,0 +1,170 @@
+---
+import Base from '../../layouts/Base.astro';
+import Disclaimer from '../../components/Disclaimer.astro';
+import { deputyIds, readJson } from '../../lib/data';
+import { reais, reaisCurto, inteiro, percentual, dataBR, MESES } from '../../lib/format';
+import { href } from '../../lib/url';
+
+export function getStaticPaths() {
+  return deputyIds().map((id) => ({ params: { id: String(id) } }));
+}
+
+const { id } = Astro.params;
+const d = readJson(`deputados/${id}.json`);
+const iniciais = d.nome.split(' ').filter(Boolean).slice(0, 2).map((s: string) => s[0]).join('');
+const anos = d.por_ano.map((y: any) => ({
+  ...y,
+  uso: y.cota_mensal ? y.total / (y.cota_mensal * y.meses_com_gastos) : null,
+}));
+const outrosPartidos = (d.partidos as string[]).filter((p) => p !== d.partido);
+const payload = { mensal: d.mensal, categorias: d.por_categoria };
+---
+<Base title={d.nome} description={`Gastos de ${d.nome} (${d.partido ?? 'sem partido'}-${d.uf}) com a cota parlamentar: categorias, fornecedores e linha do tempo.`}>
+  <section class="wrap page-head">
+    <a class="small" href={href('ranking/')}>← Ranking</a>
+    <div class="profile">
+      <div class="photo" aria-hidden="true">
+        <span>{iniciais}</span>
+        <img src={d.foto} alt="" width="96" height="128" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()" />
+      </div>
+      <div>
+        <p class="eyebrow">Deputado(a) federal · {d.uf}</p>
+        <h1>{d.nome}</h1>
+        <p class="tags">
+          <span class="pill">{d.partido ?? 'Sem partido'}</span>
+          <span class="pill">{d.uf}</span>
+          <span class="pill">{d.em_exercicio ? 'Em exercício' : 'Fora do cargo hoje'}</span>
+          {outrosPartidos.length > 0 && <span class="muted small">Também aparece nos dados como: {outrosPartidos.join(', ')}</span>}
+        </p>
+        <p class="small"><a href={d.perfil} rel="noopener">Perfil oficial na Câmara ↗</a></p>
+      </div>
+    </div>
+  </section>
+
+  <section class="wrap">
+    <div class="grid grid-4 section">
+      <div class="card stat"><div class="label">Total no período</div><div class="value" title={reais(d.total)}>{reaisCurto(d.total)}</div><div class="hint">soma do valor líquido</div></div>
+      <div class="card stat"><div class="label">Posição no ranking</div><div class="value">{d.posicao}º</div><div class="hint">de {d.de} deputados com gastos</div></div>
+      <div class="card stat"><div class="label">Despesas</div><div class="value">{inteiro(d.por_ano.reduce((s: number, y: any) => s + y.despesas, 0))}</div><div class="hint">documentos lançados</div></div>
+      <div class="card stat"><div class="label">Cota mensal ({d.uf})</div><div class="value">{reaisCurto(anos.at(-1)?.cota_mensal ?? 0)}</div><div class="hint">valor de referência da UF</div></div>
+    </div>
+
+    <div class="card section">
+      <h2>Linha do tempo</h2>
+      <p class="sub">Gasto por mês de competência.</p>
+      <div class="chart" id="c-monthly" role="img" aria-label={`Gasto mensal de ${d.nome}`}></div>
+    </div>
+
+    <div class="grid grid-2 section">
+      <div class="card">
+        <h2>Por categoria</h2>
+        <p class="sub">Todo o período.</p>
+        <div class="chart" id="c-cat" role="img" aria-label="Gasto por categoria"></div>
+      </div>
+      <div class="card">
+        <h2>Ano a ano</h2>
+        <p class="sub">“Uso estimado” divide o gasto pela cota mensal da UF vezes os meses com despesas. A mediana é a de todos os deputados do mesmo estado no ano.</p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Ano</th><th class="num">Total</th><th class="num">Uso estimado</th><th class="num">Mediana da UF</th></tr></thead>
+            <tbody>
+              {anos.map((y: any) => (
+                <tr><td>{y.ano}</td><td class="num">{reais(y.total)}</td><td class="num">{y.uso === null ? '—' : percentual(y.uso)}</td><td class="num">{reais(y.mediana_uf, false)}</td></tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <div class="card section">
+      <h2>Principais fornecedores</h2>
+      <p class="sub">Empresas e pessoas que mais receberam pagamentos deste gabinete. CPFs aparecem mascarados.</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Fornecedor</th><th>CNPJ/CPF</th><th class="num">Total</th><th class="num">Despesas</th></tr></thead>
+          <tbody>
+            {d.fornecedores.map((f: any) => (
+              <tr>
+                <td><a href={href(`fornecedores/?q=${encodeURIComponent(f.documento ?? f.nome)}`)}>{f.nome}</a></td>
+                <td class="num muted">{f.documento ?? '—'}</td>
+                <td class="num">{reais(f.total)}</td>
+                <td class="num">{inteiro(f.despesas)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card section">
+      <h2>Maiores despesas individuais</h2>
+      <p class="sub">As dez maiores notas do período, com link para o documento original quando a Câmara o publica.</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Data</th><th>Categoria</th><th>Fornecedor</th><th class="num">Valor</th><th>Documento</th></tr></thead>
+          <tbody>
+            {d.maiores_despesas.map((e: any) => (
+              <tr>
+                <td class="num">{e.data ? dataBR(e.data) : `${MESES[e.mes - 1]}/${e.ano}`}</td>
+                <td>{e.categoria}</td>
+                <td>{e.fornecedor}</td>
+                <td class="num">{reais(e.valor)}</td>
+                <td>{e.url ? <a href={e.url} rel="noopener" target="_blank">Ver nota ↗</a> : <span class="muted small">não publicado</span>}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card section" id="fora-da-curva">
+      <h2>Pontos fora da curva (estatisticamente)</h2>
+      {d.pontos_fora_da_curva.length === 0 ? (
+        <p class="muted">Nenhuma despesa deste gabinete ficou fora da faixa típica pelos critérios da <a href={href('metodologia/')}>metodologia</a>.</p>
+      ) : (
+        <>
+          <p class="sub">Despesas muito acima do típico para a mesma categoria entre deputados de {d.uf}. Mostramos até 30.</p>
+          <Disclaimer />
+          <div class="table-wrap" style="margin-top:12px">
+            <table>
+              <thead><tr><th>Data</th><th>Categoria</th><th>Fornecedor</th><th class="num">Valor</th><th class="num">Mediana do grupo</th><th class="num">× mediana</th><th>Documento</th></tr></thead>
+              <tbody>
+                {d.pontos_fora_da_curva.map((e: any) => (
+                  <tr>
+                    <td class="num">{e.data ? dataBR(e.data) : `${MESES[e.mes - 1]}/${e.ano}`}</td>
+                    <td>{e.categoria}</td>
+                    <td>{e.fornecedor}</td>
+                    <td class="num">{reais(e.valor)}</td>
+                    <td class="num">{reais(e.mediana_grupo)}</td>
+                    <td class="num">{e.vezes_mediana.toLocaleString('pt-BR')}×</td>
+                    <td>{e.url ? <a href={e.url} rel="noopener" target="_blank">Ver nota ↗</a> : <span class="muted small">não publicado</span>}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+    </div>
+  </section>
+  <script type="application/json" id="dep-data" set:html={JSON.stringify(payload)} />
+</Base>
+
+<script>
+  import { mount, monthlyChart, hbarChart } from '../../scripts/charts';
+  const data = JSON.parse(document.getElementById('dep-data')!.textContent!);
+  mount(document.getElementById('c-monthly'), (w) => monthlyChart(data.mensal, w, 240));
+  mount(document.getElementById('c-cat'), (w) =>
+    hbarChart(data.categorias.slice(0, 10).map((c: any) => ({ label: c.categoria, value: c.total, extra: `${c.despesas} despesa(s)` })), w));
+</script>
+
+<style>
+  .profile { display: flex; gap: 20px; align-items: center; margin-top: 14px; }
+  .photo { position: relative; flex-shrink: 0; width: 96px; height: 128px; border-radius: 14px; overflow: hidden; background: var(--accent-soft); display: grid; place-items: center; border: 1px solid var(--border); }
+  .photo span { font-size: 2rem; font-weight: 700; color: var(--accent-ink); }
+  .photo img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+  .tags { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: .4rem; }
+  .profile h1 { margin-bottom: .3em; }
+  @media (max-width: 520px) { .profile { align-items: flex-start; } .photo { width: 72px; height: 96px; } }
+</style>

@@ -1,0 +1,10 @@
+---
+import Base from '../layouts/Base.astro';
+import { href } from '../lib/url';
+---
+<Base title="Página não encontrada">
+  <section class="wrap page-head">
+    <h1>Página não encontrada</h1>
+    <p class="lede">O endereço pode ter mudado. Volte para o <a href={href()}>início</a> ou procure no <a href={href('ranking/')}>ranking</a>.</p>
+  </section>
+</Base>

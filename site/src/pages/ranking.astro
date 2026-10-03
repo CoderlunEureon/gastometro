@@ -1,0 +1,125 @@
+---
+import Base from '../layouts/Base.astro';
+import Disclaimer from '../components/Disclaimer.astro';
+import { meta, readJson } from '../lib/data';
+import { href } from '../lib/url';
+
+const m = meta();
+const ranking = readJson('ranking.json');
+const ufs = [...new Set(ranking.deputados.map((d: any[]) => d[3]).filter(Boolean))].sort() as string[];
+const partidos = [...new Set(ranking.deputados.map((d: any[]) => d[2]).filter(Boolean))].sort() as string[];
+---
+<Base title="Ranking" active="ranking" description="Ranking dos deputados federais pelo valor usado da cota parlamentar, com filtros por ano, estado, partido e categoria.">
+  <section class="wrap page-head">
+    <p class="eyebrow">Ranking</p>
+    <h1>Uso da cota por deputado</h1>
+    <p class="lede">Soma das despesas de cada deputado. Use os filtros para comparar por ano, estado, partido ou tipo de gasto. Lembre que a cota mensal varia por estado e que suplentes ficam menos tempo no cargo.</p>
+  </section>
+  <section class="wrap">
+    <form class="card controls" id="filters" onsubmit="return false" aria-label="Filtros do ranking">
+      <label class="field">Ano
+        <select name="ano">
+          <option value="">Todos</option>
+          {m.anos.map((a) => <option value={String(a)}>{a}</option>)}
+        </select>
+      </label>
+      <label class="field">Estado
+        <select name="uf"><option value="">Todos</option>{ufs.map((u) => <option>{u}</option>)}</select>
+      </label>
+      <label class="field">Partido
+        <select name="partido"><option value="">Todos</option>{partidos.map((p) => <option>{p}</option>)}</select>
+      </label>
+      <label class="field">Categoria
+        <select name="categoria"><option value="">Todas</option>{ranking.categorias.map((c: any[], i: number) => <option value={String(i)}>{c[1]}</option>)}</select>
+      </label>
+      <label class="field" style="flex:1;min-width:180px">Nome
+        <input type="search" name="q" placeholder="Buscar deputado" autocomplete="off" />
+      </label>
+      <label class="field" style="flex-direction:row;align-items:center;gap:6px;min-height:40px">
+        <input type="checkbox" name="exercicio" /> Só em exercício
+      </label>
+    </form>
+
+    <p class="muted small" id="summary" aria-live="polite"></p>
+
+    <div class="card">
+      <div class="table-wrap">
+        <table>
+          <caption class="sr-only">Ranking de deputados pelo valor gasto</caption>
+          <thead><tr><th class="rank">#</th><th>Deputado</th><th class="num">Total</th><th class="num">Despesas</th><th aria-hidden="true"></th></tr></thead>
+          <tbody id="rows"><tr><td colspan="5" class="muted">Carregando…</td></tr></tbody>
+        </table>
+      </div>
+      <p style="margin:12px 0 0"><button class="btn" type="button" id="more" hidden>Mostrar mais</button></p>
+    </div>
+    <div class="section"><Disclaimer compact /></div>
+  </section>
+  <script type="application/json" id="rk-config" set:html={JSON.stringify({ url: href('data/ranking.json'), base: href('') })} />
+</Base>
+
+<script>
+  import { reais, inteiro, semAcento, esc } from '../lib/format';
+
+  const cfg = JSON.parse(document.getElementById('rk-config')!.textContent!);
+  const form = document.getElementById('filters') as HTMLFormElement;
+  const tbody = document.getElementById('rows')!;
+  const more = document.getElementById('more') as HTMLButtonElement;
+  let limit = 100;
+  let data: any;
+
+  // restore filters from the URL
+  const params = new URLSearchParams(location.search);
+  for (const [k, v] of params) {
+    const el = form.elements.namedItem(k) as HTMLInputElement | null;
+    if (!el) continue;
+    if (el.type === 'checkbox') el.checked = v === '1'; else el.value = v;
+  }
+
+  function render() {
+    const f = new FormData(form);
+    const ano = String(f.get('ano') ?? ''), uf = String(f.get('uf') ?? ''), partido = String(f.get('partido') ?? '');
+    const cat = String(f.get('categoria') ?? ''), q = semAcento(String(f.get('q') ?? '').trim());
+    const exercicio = f.get('exercicio') === 'on';
+
+    const qs = new URLSearchParams();
+    if (ano) qs.set('ano', ano); if (uf) qs.set('uf', uf); if (partido) qs.set('partido', partido);
+    if (cat) qs.set('categoria', cat); if (q) qs.set('q', String(f.get('q'))); if (exercicio) qs.set('exercicio', '1');
+    history.replaceState(null, '', qs.toString() ? `?${qs}` : location.pathname);
+
+    const sums = new Map<number, { total: number; n: number }>();
+    for (const [d, a, c, total, n] of data.linhas) {
+      if (ano && String(a) !== ano) continue;
+      if (cat && String(c) !== cat) continue;
+      const dep = data.deputados[d];
+      if (uf && dep[3] !== uf) continue;
+      if (partido && dep[2] !== partido) continue;
+      if (exercicio && !dep[4]) continue;
+      const cur = sums.get(d) ?? { total: 0, n: 0 };
+      cur.total += total; cur.n += n;
+      sums.set(d, cur);
+    }
+    let rows = [...sums.entries()].sort((a, b) => b[1].total - a[1].total).map(([d, v], i) => ({ pos: i + 1, d, ...v }));
+    const grand = rows.reduce((s, r) => s + r.total, 0);
+    if (q) rows = rows.filter((r) => semAcento(data.deputados[r.d][1]).includes(q));
+    const max = rows.reduce((m, r) => Math.max(m, r.total), 0) || 1;
+    document.getElementById('summary')!.textContent =
+      `${inteiro(sums.size)} deputados · ${reais(grand)} no filtro selecionado`;
+    tbody.innerHTML = rows.slice(0, limit).map((r) => {
+      const [id, nome, p, u, ex] = data.deputados[r.d];
+      return `<tr>
+        <td class="rank num">${r.pos}</td>
+        <td><a href="${cfg.base}deputado/${id}/">${esc(nome)}</a> <span class="pill">${p ?? 's/partido'}-${u ?? ''}</span>${ex ? '' : ' <span class="pill" title="Não está em exercício hoje">fora do cargo</span>'}</td>
+        <td class="num">${reais(r.total)}</td>
+        <td class="num">${inteiro(r.n)}</td>
+        <td class="bar-cell" aria-hidden="true"><div class="bar" style="width:${(100 * r.total / max).toFixed(1)}%"></div></td>
+      </tr>`;
+    }).join('') || '<tr><td colspan="5" class="muted">Nenhum deputado com esses filtros.</td></tr>';
+    more.hidden = rows.length <= limit;
+  }
+
+  form.addEventListener('input', () => { limit = 100; render(); });
+  more.addEventListener('click', () => { limit += 200; render(); });
+
+  fetch(cfg.url).then((r) => r.json()).then((json) => { data = json; render(); })
+    .catch(() => { tbody.innerHTML = '<tr><td colspan="5">Não foi possível carregar os dados.</td></tr>'; });
+</script>

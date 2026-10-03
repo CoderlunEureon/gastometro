@@ -1,0 +1,13 @@
+---
+import { href } from '../lib/url';
+interface Props { compact?: boolean }
+const { compact = false } = Astro.props;
+---
+<aside class="note" role="note" aria-label="Aviso sobre a leitura dos dados">
+  <strong>Como ler estes dados.</strong>
+  {compact ? (
+    <> Os valores são oficiais, publicados pela Câmara dos Deputados. Um valor estatisticamente atípico não indica irregularidade: consulte sempre o documento original. <a href={href('metodologia/')}>Metodologia</a>.</>
+  ) : (
+    <> Os dados são oficiais e aparecem como a Câmara dos Deputados os publica. “Ponto fora da curva” é só uma medida estatística: significa que um valor está longe do típico para o grupo de comparação. <strong>Isso não indica irregularidade</strong> e pode ter explicações simples (pagamentos agrupados, contratos anuais, viagens longas, saldo acumulado da cota). Antes de tirar qualquer conclusão, abra o documento original (link “Ver nota”) e leia a <a href={href('metodologia/')}>metodologia</a>.</>
+  )}
+</aside>

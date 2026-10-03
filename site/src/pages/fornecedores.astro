@@ -1,0 +1,88 @@
+---
+import Base from '../layouts/Base.astro';
+import Disclaimer from '../components/Disclaimer.astro';
+import { readJson } from '../lib/data';
+import { inteiro } from '../lib/format';
+import { href } from '../lib/url';
+
+const f = readJson('fornecedores.json');
+---
+<Base title="Fornecedores" active="fornecedores" description="Busca de fornecedores pagos com a cota parlamentar, por nome ou CNPJ.">
+  <section class="wrap page-head">
+    <p class="eyebrow">Fornecedores</p>
+    <h1>Quem recebe da cota parlamentar</h1>
+    <p class="lede">Busque por nome ou CNPJ. A busca cobre os {inteiro(f.incluidos)} fornecedores que mais receberam, de um total de {inteiro(f.total_fornecedores)} distintos no período. Pessoas físicas aparecem com CPF mascarado.</p>
+  </section>
+  <section class="wrap">
+    <div class="card controls">
+      <label class="field" style="flex:1">
+        Nome ou CNPJ
+        <input type="search" id="q" placeholder="Ex.: posto, gráfica, 07.575.651/0001-59" autocomplete="off" />
+      </label>
+      <label class="field">Categoria principal
+        <select id="cat"><option value="">Todas</option>{Object.entries(f.categorias).sort((a: any, b: any) => a[1].localeCompare(b[1])).map(([k, v]) => <option value={k}>{v as string}</option>)}</select>
+      </label>
+    </div>
+    <p class="muted small" id="summary" aria-live="polite"></p>
+    <div id="results" class="results"></div>
+    <p><button class="btn" type="button" id="more" hidden>Mostrar mais</button></p>
+    <div class="section"><Disclaimer compact /></div>
+  </section>
+  <script type="application/json" id="fn-config" set:html={JSON.stringify({ url: href('data/fornecedores.json'), base: href('') })} />
+</Base>
+
+<script>
+  import { reais, inteiro, semAcento, esc } from '../lib/format';
+  const cfg = JSON.parse(document.getElementById('fn-config')!.textContent!);
+  const q = document.getElementById('q') as HTMLInputElement;
+  const cat = document.getElementById('cat') as HTMLSelectElement;
+  const out = document.getElementById('results')!;
+  const more = document.getElementById('more') as HTMLButtonElement;
+  let data: any, index: string[] = [], limit = 30;
+
+  q.value = new URLSearchParams(location.search).get('q') ?? '';
+
+  function render() {
+    const term = semAcento(q.value.trim());
+    const digits = q.value.replace(/\D/g, '');
+    const qs = new URLSearchParams(); if (q.value.trim()) qs.set('q', q.value.trim());
+    history.replaceState(null, '', qs.toString() ? `?${qs}` : location.pathname);
+    const rows = data.linhas.filter((r: any[], i: number) =>
+      (!cat.value || String(r[6]) === cat.value) &&
+      (!term || index[i].includes(term) || (digits.length >= 4 && String(r[0]).includes(digits))));
+    document.getElementById('summary')!.textContent = `${inteiro(rows.length)} fornecedor(es) encontrados`;
+    out.innerHTML = rows.slice(0, limit).map((r: any[]) => {
+      const [, nome, doc, total, docs, gabs, c, deps] = r;
+      return `<article class="card supplier">
+        <div class="head">
+          <div><h3>${esc(nome)}</h3><div class="muted small">${esc(doc ?? 'sem documento')} · ${esc(data.categorias[c] ?? '')}</div></div>
+          <div class="amount"><strong>${reais(total)}</strong><div class="muted small">${inteiro(docs)} despesas · ${inteiro(gabs)} gabinete(s)</div></div>
+        </div>
+        <div class="deps small"><span class="muted">Principais pagadores:</span> ${deps.map(([d, v]: [number, number]) => {
+          const [id, n, p, u] = data.deputados[d];
+          return `<a href="${cfg.base}deputado/${id}/">${esc(n)}</a> <span class="muted">(${esc(p ?? '')}-${esc(u ?? '')}, ${reais(v, false)})</span>`;
+        }).join(' · ')}</div>
+      </article>`;
+    }).join('') || '<p class="muted">Nada encontrado. Fornecedores menores podem não estar na busca: veja os dados completos no arquivo da Câmara.</p>';
+    more.hidden = rows.length <= limit;
+  }
+
+  q.addEventListener('input', () => { limit = 30; render(); });
+  cat.addEventListener('change', () => { limit = 30; render(); });
+  more.addEventListener('click', () => { limit += 60; render(); });
+
+  fetch(cfg.url).then((r) => r.json()).then((json) => {
+    data = json;
+    index = data.linhas.map((r: any[]) => semAcento(`${r[1]} ${r[2] ?? ''}`));
+    render();
+  }).catch(() => { out.innerHTML = '<p>Não foi possível carregar os dados.</p>'; });
+</script>
+
+<style>
+  .results { display: grid; gap: 12px; }
+  .results :global(.supplier .head) { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+  .results :global(.supplier h3) { margin: 0 0 2px; font-size: 1rem; overflow-wrap: anywhere; }
+  .results :global(.supplier .amount) { text-align: right; font-variant-numeric: tabular-nums; }
+  .results :global(.supplier .deps) { margin-top: 10px; line-height: 1.7; }
+  @media (max-width: 520px) { .results :global(.supplier .amount) { text-align: left; } }
+</style>
