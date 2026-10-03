@@ -6,7 +6,6 @@ build-backend = "setuptools.build_meta"
 name = "gastometro"
 version = "0.1.0"
 description = "Pipeline de dados da Cota Parlamentar (CEAP) da Câmara dos Deputados"
-readme = "../README.md"
 license = "MIT"
 requires-python = ">=3.12"
 dependencies = [
